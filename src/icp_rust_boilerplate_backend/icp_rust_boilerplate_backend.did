@@ -1,0 +1,97 @@
+type Case = record {
+  id : nat64;
+  status : CaseStatus;
+  title : text;
+  case_number : text;
+  judge_id : nat64;
+  description : text;
+  created_at : nat64;
+  lawyer_ids : vec nat64;
+};
+type CasePayload = record {
+  title : text;
+  case_number : text;
+  judge_id : nat64;
+  password : text;
+  description : text;
+  lawyer_ids : vec nat64;
+};
+type CaseStatus = variant { Closed; Ongoing; Pending };
+type Document = record {
+  id : nat64;
+  title : text;
+  file : vec nat8;
+  case_id : nat64;
+  description : text;
+  created_at : nat64;
+};
+type DocumentPayload = record {
+  title : text;
+  file : vec nat8;
+  case_id : nat64;
+  description : text;
+};
+type Hearing = record {
+  id : nat64;
+  judge_id : nat64;
+  date : nat64;
+  case_id : nat64;
+  description : text;
+  created_at : nat64;
+  location : text;
+};
+type HearingPayload = record {
+  judge_id : nat64;
+  date : nat64;
+  password : text;
+  case_id : nat64;
+  description : text;
+  location : text;
+};
+type Message = record {
+  id : nat64;
+  content : text;
+  recipient_id : nat64;
+  case_id : nat64;
+  created_at : nat64;
+  sender_id : nat64;
+};
+type MessagePayload = record {
+  content : text;
+  recipient_id : nat64;
+  case_id : nat64;
+  sender_id : nat64;
+};
+type Result = variant { Ok : Case; Err : text };
+type Result_1 = variant { Ok : Document; Err : text };
+type Result_2 = variant { Ok : Hearing; Err : text };
+type Result_3 = variant { Ok : UserProfile; Err : text };
+type Result_4 = variant { Ok : vec Case; Err : text };
+type Result_5 = variant { Ok : vec Document; Err : text };
+type Result_6 = variant { Ok : vec Hearing; Err : text };
+type Result_7 = variant { Ok : Message; Err : text };
+type UserPayload = record {
+  username : text;
+  password : text;
+  role : UserRole;
+  email : text;
+};
+type UserProfile = record {
+  id : nat64;
+  username : text;
+  password : text;
+  role : UserRole;
+  created_at : nat64;
+  email : text;
+};
+type UserRole = variant { Litigant; Lawyer; Judge; CourtStaff };
+service : {
+  create_case : (CasePayload) -> (Result);
+  create_document : (DocumentPayload) -> (Result_1);
+  create_hearing : (HearingPayload) -> (Result_2);
+  create_user : (UserPayload) -> (Result_3);
+  get_cases : () -> (Result_4) query;
+  get_documents : () -> (Result_5) query;
+  get_hearings : () -> (Result_6) query;
+  send_message : (MessagePayload) -> (Result_7);
+}
