@@ -317,7 +317,7 @@ fn verify_password(password: &str, hashed: &str) -> bool {
     hashed == hash_password(password)
 }
 
-// Helper function to validate  passwords
+// Helper function to validate passwords
 fn validate_password(password: &str) -> Result<(), String> {
     let min_length = 8;
     let has_uppercase = Regex::new(r"[A-Z]").unwrap();
@@ -388,12 +388,7 @@ fn create_user(payload: UserPayload) -> Result<UserProfile, String> {
     }
 
     // Increment the ID counter and create a new user profile
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment ID counter");
+    let id = increment_id_counter()?;
 
     let user_profile = UserProfile {
         id,
@@ -413,74 +408,26 @@ fn create_user(payload: UserPayload) -> Result<UserProfile, String> {
 #[ic_cdk::update]
 fn create_case(payload: CasePayload) -> Result<Case, String> {
     // Validate payload to ensure required fields are present and are not empty
-    if payload.case_number.is_empty() || payload.title.is_empty() || payload.description.is_empty()
-    {
+    if payload.case_number.is_empty() || payload.title.is_empty() || payload.description.is_empty() {
         return Err("Case number, title, and description are required".to_string());
     }
 
     // Ensure only the judge can create a case
-    let user = USERS_STORAGE.with(|storage| {
-        storage
-            .borrow()
-            .iter()
-            .find(|(_, user)| user.id == payload.judge_id)
-    });
-
-    if let Some((_, user)) = user {
-        if user.role != UserRole::Judge {
-            return Err("Only a judge can create a case".to_string());
-        }
-    } else {
-        return Err("Invalid judge ID".to_string());
+    if !is_user_judge(payload.judge_id) {
+        return Err("Only a judge can create a case".to_string());
     }
 
-    // Verify the password  for the judge
-    let user = USERS_STORAGE.with(|storage| {
-        storage
-            .borrow()
-            .iter()
-            .find(|(_, user)| user.id == payload.judge_id)
-    });
-
-    if let Some((_, user)) = user {
-        if !verify_password(&payload.password, &user.password) {
-            return Err("Invalid password".to_string());
-        }
-    } else {
-        return Err("Invalid judge ID".to_string());
-    }
-
-    // Ensure the judge ID is valid
-    let judge_exists = USERS_STORAGE.with(|storage| {
-        storage
-            .borrow()
-            .iter()
-            .any(|(_, user)| user.id == payload.judge_id && user.role == UserRole::Judge)
-    });
-    if !judge_exists {
-        return Err("Invalid judge ID".to_string());
+    // Verify the password for the judge
+    if !verify_user_password(payload.judge_id, &payload.password) {
+        return Err("Invalid password".to_string());
     }
 
     // Ensure the lawyer IDs are valid
-    let lawyers_exist = USERS_STORAGE.with(|storage| {
-        payload.lawyer_ids.iter().all(|lawyer_id| {
-            storage
-                .borrow()
-                .iter()
-                .any(|(_, user)| user.id == *lawyer_id && user.role == UserRole::Lawyer)
-        })
-    });
-
-    if !lawyers_exist {
+    if !are_lawyer_ids_valid(&payload.lawyer_ids) {
         return Err("Invalid lawyer ID(s)".to_string());
     }
 
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment ID counter");
+    let id = increment_id_counter()?;
 
     let case = Case {
         id,
@@ -496,12 +443,12 @@ fn create_case(payload: CasePayload) -> Result<Case, String> {
     CASES_STORAGE.with(|storage| storage.borrow_mut().insert(id, case.clone()));
 
     // Log audit
-    log_audit("Create case", case.id);
+    log_audit("Create case", payload.judge_id, case.id);
 
     Ok(case)
 }
 
-// Fuction to get all cases
+// Function to get all cases
 #[ic_cdk::query]
 fn get_cases() -> Result<Vec<Case>, String> {
     CASES_STORAGE.with(|storage| {
@@ -527,62 +474,22 @@ fn create_hearing(payload: HearingPayload) -> Result<Hearing, String> {
         return Err("Location and description are required".to_string());
     }
 
-    // Ensure only the judge can create a case
-    let user = USERS_STORAGE.with(|storage| {
-        storage
-            .borrow()
-            .iter()
-            .find(|(_, user)| user.id == payload.judge_id)
-    });
-
-    if let Some((_, user)) = user {
-        if user.role != UserRole::Judge {
-            return Err("Only a judge can create a case".to_string());
-        }
-    } else {
-        return Err("Invalid judge ID".to_string());
+    // Ensure only the judge can create a hearing
+    if !is_user_judge(payload.judge_id) {
+        return Err("Only a judge can create a hearing".to_string());
     }
 
-    // Verify the password  for the judge
-    let user = USERS_STORAGE.with(|storage| {
-        storage
-            .borrow()
-            .iter()
-            .find(|(_, user)| user.id == payload.judge_id)
-    });
-
-    if let Some((_, user)) = user {
-        if !verify_password(&payload.password, &user.password) {
-            return Err("Invalid password".to_string());
-        }
-    } else {
-        return Err("Invalid judge ID".to_string());
-    }
-
-    // Ensure the judge ID is valid
-    let judge_exists = USERS_STORAGE.with(|storage| {
-        storage
-            .borrow()
-            .iter()
-            .any(|(_, user)| user.id == payload.judge_id && user.role == UserRole::Judge)
-    });
-    if !judge_exists {
-        return Err("Invalid judge ID".to_string());
+    // Verify the password for the judge
+    if !verify_user_password(payload.judge_id, &payload.password) {
+        return Err("Invalid password".to_string());
     }
 
     // Ensure the case ID is valid
-    let case_exists = CASES_STORAGE.with(|storage| storage.borrow().contains_key(&payload.case_id));
-    if !case_exists {
+    if !is_case_id_valid(payload.case_id) {
         return Err("Invalid case ID".to_string());
     }
 
-    // Create a new hearing
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment ID counter");
+    let id = increment_id_counter()?;
 
     let hearing = Hearing {
         id,
@@ -597,10 +504,7 @@ fn create_hearing(payload: HearingPayload) -> Result<Hearing, String> {
     HEARINGS_STORAGE.with(|storage| storage.borrow_mut().insert(id, hearing.clone()));
 
     // Notify users about the hearing
-    notify_users(
-        hearing.case_id,
-        format!("New hearing scheduled at {}", hearing.location),
-    );
+    notify_users(hearing.case_id, format!("New hearing scheduled at {}", hearing.location));
 
     Ok(hearing)
 }
@@ -632,34 +536,16 @@ fn create_document(payload: DocumentPayload) -> Result<Document, String> {
     }
 
     // Ensure the case ID is valid
-    let case_exists = CASES_STORAGE.with(|storage| storage.borrow().contains_key(&payload.case_id));
-    if !case_exists {
+    if !is_case_id_valid(payload.case_id) {
         return Err("Invalid case ID".to_string());
     }
 
     // Ensure the user is authorized to upload a document
-    let user = USERS_STORAGE.with(|storage| {
-        storage
-            .borrow()
-            .iter()
-            .find(|(_, user)| user.id == payload.case_id)
-    });
-
-    if let Some((_, user)) = user {
-        if user.role != UserRole::Lawyer {
-            return Err("Only a lawyer can upload a document".to_string());
-        }
-    } else {
-        return Err("Invalid user ID".to_string());
+    if !is_user_lawyer(payload.case_id) {
+        return Err("Only a lawyer can upload a document".to_string());
     }
 
-    // Ensure the case ID is valid
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment ID counter");
+    let id = increment_id_counter()?;
 
     let document = Document {
         id,
@@ -673,13 +559,10 @@ fn create_document(payload: DocumentPayload) -> Result<Document, String> {
     DOCUMENTS_STORAGE.with(|storage| storage.borrow_mut().insert(id, document.clone()));
 
     // Log audit
-    log_audit("Create document", document.id);
+    log_audit("Create document", payload.case_id, document.id);
 
     // Notify users about the new document
-    notify_users(
-        document.case_id,
-        format!("New document uploaded: {}", document.title),
-    );
+    notify_users(document.case_id, format!("New document uploaded: {}", document.title));
 
     Ok(document)
 }
@@ -709,12 +592,7 @@ fn send_message(payload: MessagePayload) -> Result<Message, String> {
         return Err("Content is required".to_string());
     }
 
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment ID counter");
+    let id = increment_id_counter()?;
 
     let message = Message {
         id,
@@ -728,30 +606,22 @@ fn send_message(payload: MessagePayload) -> Result<Message, String> {
     MESSAGES_STORAGE.with(|storage| storage.borrow_mut().insert(id, message.clone()));
 
     // Log audit
-    log_audit("Send message", message.id);
+    log_audit("Send message", payload.sender_id, message.id);
 
     // Notify recipient about the new message
-    notify_user(
-        message.recipient_id,
-        format!("New message: {}", message.content),
-    );
+    notify_user(message.recipient_id, format!("New message: {}", message.content));
 
     Ok(message)
 }
 
 // Helper function to log audits
-fn log_audit(action: &str, _entity_id: u64) {
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment ID counter");
+fn log_audit(action: &str, user_id: u64, entity_id: u64) {
+    let id = increment_id_counter().expect("Cannot increment ID counter");
 
     let audit_log = AuditLog {
         id,
         action: action.to_string(),
-        user_id: 0, // Replace with the actual user performing the action
+        user_id,
         timestamp: current_time(),
     };
 
@@ -774,12 +644,7 @@ fn notify_users(case_id: u64, message: String) {
 
 // Helper function to notify a single user
 fn notify_user(user_id: u64, message: String) {
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment ID counter");
+    let id = increment_id_counter().expect("Cannot increment ID counter");
 
     let notification = Notification {
         id,
@@ -790,6 +655,66 @@ fn notify_user(user_id: u64, message: String) {
 
     NOTIFICATIONS_STORAGE.with(|storage| storage.borrow_mut().insert(id, notification));
 }
+
+// Helper function to check if a user is a judge
+fn is_user_judge(user_id: u64) -> bool {
+    USERS_STORAGE.with(|storage| {
+        storage
+            .borrow()
+            .iter()
+            .any(|(_, user)| user.id == user_id && user.role == UserRole::Judge)
+    })
+}
+
+// Helper function to verify user's password
+fn verify_user_password(user_id: u64, password: &str) -> bool {
+    USERS_STORAGE.with(|storage| {
+        storage
+            .borrow()
+            .iter()
+            .find(|(_, user)| user.id == user_id)
+            .map(|(_, user)| verify_password(password, &user.password))
+            .unwrap_or(false)
+    })
+}
+
+// Helper function to check if lawyer IDs are valid
+fn are_lawyer_ids_valid(lawyer_ids: &[u64]) -> bool {
+    USERS_STORAGE.with(|storage| {
+        lawyer_ids.iter().all(|&lawyer_id| {
+            storage
+                .borrow()
+                .iter()
+                .any(|(_, user)| user.id == lawyer_id && user.role == UserRole::Lawyer)
+        })
+    })
+}
+
+// Helper function to check if a user is a lawyer
+fn is_user_lawyer(user_id: u64) -> bool {
+    USERS_STORAGE.with(|storage| {
+        storage
+            .borrow()
+            .iter()
+            .any(|(_, user)| user.id == user_id && user.role == UserRole::Lawyer)
+    })
+}
+
+// Helper function to check if a case ID is valid
+fn is_case_id_valid(case_id: u64) -> bool {
+    CASES_STORAGE.with(|storage| storage.borrow().contains_key(&case_id))
+}
+
+// Helper function to increment ID counter
+fn increment_id_counter() -> Result<u64, String> {
+    ID_COUNTER.with(|counter: &RefCell<IdCell>| {
+        let current_value = *counter.borrow().get();
+        counter.borrow_mut().set(current_value + 1).map_err(|e| format!("Failed to set ID counter: {:?}", e))?;
+        Ok(current_value + 1)
+    })
+}
+
+
 
 // Error types
 #[derive(candid::CandidType, Deserialize, Serialize)]
