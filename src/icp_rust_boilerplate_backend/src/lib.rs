@@ -715,7 +715,6 @@ fn increment_id_counter() -> Result<u64, String> {
 }
 
 
-
 // Error types
 #[derive(candid::CandidType, Deserialize, Serialize)]
 enum Error {
